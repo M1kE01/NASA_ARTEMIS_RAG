@@ -1,0 +1,1 @@
+This project is dedicated to creation of a RAG-based assistant for NASA's Artemis mission.
