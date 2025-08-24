@@ -13,6 +13,8 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 
+from neo4j import GraphDatabase
+
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 
@@ -71,10 +73,42 @@ for d in data:
             )
         )
 
-print(len(docs), docs[0].metadata["chunk_id"])
+texts = [d.page_content for d in docs]
+vecs = embeddings.embed_documents(texts)   # 768-d vectors
 
+driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
 
+UPSERT = """
+MERGE (d:Document {doc_id:$doc_id})
+  ON CREATE SET d.title=$title, d.url=$url, d.source='nasa', d.published_at=$published_at
+MERGE (c:Chunk {chunk_id:$chunk_id})
+  ON CREATE SET
+    c.doc_id=$doc_id,
+    c.title=$title,          // convenience copy for downstream
+    c.text=$text,
+    c.start_char=$start_char,
+    c.end_char=$end_char,
+    c.embedding=$embedding
+MERGE (c)-[:CHUNK_OF]->(d)
+"""
 
+with driver.session(database="neo4j") as s:
+    for ddoc, text, emb in zip(docs, texts, vecs):
+        m = ddoc.metadata
+        s.run(
+            UPSERT,
+            doc_id=m["doc_id"],
+            title=m["title"],
+            url=m["url"],
+            published_at=m.get("published_at"),
+            chunk_id=m["chunk_id"],
+            text=text,
+            start_char=m["start_char"],
+            end_char=m["end_char"],
+            embedding=emb,
+        )
 
+driver.close()
+print(f"Loaded {len(docs)} chunks into Neo4j.")
 
 
