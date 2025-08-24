@@ -12,6 +12,11 @@ CREATE INDEX entity_name IF NOT EXISTS FOR (e:Entity) ON (e.name);
 CREATE VECTOR INDEX chunk_embedding IF NOT EXISTS
 FOR (c:Chunk) ON (c.embedding)
 OPTIONS { indexConfig: { `vector.dimensions`: 768, `vector.similarity_function`: 'cosine' } };
+
+CREATE FULLTEXT INDEX chunk_text IF NOT EXISTS
+FOR (c:Chunk) ON EACH [c.text];
+
+CALL db.awaitIndexes();
 """
 
 with GraphDatabase.driver(uri, auth=(user, pwd)).session(database="neo4j") as s:

@@ -1,51 +1,49 @@
-import numpy as np
-import pandas as pd
 import os
-import getpass
-import langchain
-import openai
-from dotenv import load_dotenv, find_dotenv
-import langchain_community
-from langchain_community.document_loaders import UnstructuredMarkdownLoader
-from langchain.chat_models import init_chat_model
 import json
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_core.documents import Document
+from pathlib import Path
 
+from dotenv import load_dotenv, find_dotenv
 from neo4j import GraphDatabase
 
-from langchain_google_genai import ChatGoogleGenerativeAI
-
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.documents import Document
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 load_dotenv(find_dotenv(), override=True)
-print("Loaded .env from:", find_dotenv())
+os.environ["LANGSMITH_TRACING"] = "false"
+os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-
-if not GOOGLE_API_KEY:
-    raise RuntimeError("Set GOOGLE_API_KEY in .env")
-
 NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 
-llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=GOOGLE_API_KEY, temperature=0)
-embeddings = GoogleGenerativeAIEmbeddings(model="text-embedding-004", google_api_key=GOOGLE_API_KEY)
-splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=120
+if not GOOGLE_API_KEY:
+    raise RuntimeError("Set GOOGLE_API_KEY in .env")
+if not (NEO4J_URI and NEO4J_USERNAME and NEO4J_PASSWORD):
+    raise RuntimeError("Set NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD in .env")
+
+DATA_JSONL = os.getenv(
+    "DATA_JSONL",
+    r"C:\Users\mihai\Projects\RAG_NASA\data\processed\nasa_artemis.jsonl",
 )
 
-with open(r"C:\Users\mihai\Projects\RAG_NASA\data\processed\nasa_artemis.jsonl", "r", encoding="utf-8") as f:
+p = Path(DATA_JSONL)
+if not p.exists():
+    raise FileNotFoundError(f"Cannot find {p}")
+with p.open("r", encoding="utf-8") as f:
     data = [json.loads(line) for line in f if line.strip()]
+
+print(f"Loaded {len(data)} source documents from {p}")
+
+splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=120)
 
 docs = []
 for d in data:
     text = d["text"]
     pieces = splitter.split_text(text)
 
-    # track character spans so we can cite exact positions
+    # track deterministic spans for each chunk (start_char, end_char)
     spans, pos = [], 0
     for ch in pieces:
         start = text.find(ch, pos)
@@ -73,42 +71,61 @@ for d in data:
             )
         )
 
+print(f"Created {len(docs)} chunks")
+
+embeddings = GoogleGenerativeAIEmbeddings(
+    model="text-embedding-004", google_api_key=GOOGLE_API_KEY
+)
 texts = [d.page_content for d in docs]
-vecs = embeddings.embed_documents(texts)   # 768-d vectors
+vecs = embeddings.embed_documents(texts)  # 768-d vectors
 
-driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
+rows = []
+for ddoc, text, emb in zip(docs, texts, vecs):
+    m = ddoc.metadata
+    rows.append(
+        {
+            "doc_id": m["doc_id"],
+            "title": m["title"],
+            "url": m["url"],
+            "published_at": m.get("published_at"),
+            "chunk_id": m["chunk_id"],
+            "text": text,
+            "start_char": m["start_char"],
+            "end_char": m["end_char"],
+            "embedding": emb,
+        }
+    )
 
-UPSERT = """
-MERGE (d:Document {doc_id:$doc_id})
-  ON CREATE SET d.title=$title, d.url=$url, d.source='nasa', d.published_at=$published_at
-MERGE (c:Chunk {chunk_id:$chunk_id})
+UPSERT_BATCH = """
+UNWIND $rows AS row
+MERGE (d:Document {doc_id: row.doc_id})
   ON CREATE SET
-    c.doc_id=$doc_id,
-    c.title=$title,          // convenience copy for downstream
-    c.text=$text,
-    c.start_char=$start_char,
-    c.end_char=$end_char,
-    c.embedding=$embedding
+    d.title = row.title,
+    d.url = row.url,
+    d.source = 'nasa',
+    d.published_at = row.published_at
+MERGE (c:Chunk {chunk_id: row.chunk_id})
+  ON CREATE SET
+    c.doc_id = row.doc_id,
+    c.title = row.title,
+    c.url = row.url,
+    c.text = row.text,
+    c.start_char = row.start_char,
+    c.end_char = row.end_char,
+    c.embedding = row.embedding
+  ON MATCH SET
+    c.title = row.title,
+    c.url = row.url,
+    c.text = row.text,
+    c.start_char = row.start_char,
+    c.end_char = row.end_char,
+    c.embedding = row.embedding
 MERGE (c)-[:CHUNK_OF]->(d)
 """
 
+driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
 with driver.session(database="neo4j") as s:
-    for ddoc, text, emb in zip(docs, texts, vecs):
-        m = ddoc.metadata
-        s.run(
-            UPSERT,
-            doc_id=m["doc_id"],
-            title=m["title"],
-            url=m["url"],
-            published_at=m.get("published_at"),
-            chunk_id=m["chunk_id"],
-            text=text,
-            start_char=m["start_char"],
-            end_char=m["end_char"],
-            embedding=emb,
-        )
-
+    s.run(UPSERT_BATCH, rows=rows)
 driver.close()
-print(f"Loaded {len(docs)} chunks into Neo4j.")
 
-
+print(f"Upserted {len(rows)} chunks to Neo4j.")
