@@ -2,6 +2,10 @@ import os
 import sys
 from typing import List, Dict
 import webbrowser
+from neo4j import GraphDatabase
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv(), override=True)
@@ -9,11 +13,6 @@ load_dotenv(find_dotenv(), override=True)
 # Silence LangSmith
 os.environ["LANGSMITH_TRACING"] = "false"
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
-
-from neo4j import GraphDatabase
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 NEO4J_URI = os.getenv("NEO4J_URI")
@@ -27,7 +26,6 @@ if not (GOOGLE_API_KEY and NEO4J_URI and NEO4J_USERNAME and NEO4J_PASSWORD):
 emb = GoogleGenerativeAIEmbeddings(model="text-embedding-004", google_api_key=GOOGLE_API_KEY)
 llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=GOOGLE_API_KEY, temperature=0)
 driver = GraphDatabase.driver(NEO4J_URI, auth=(NEO4J_USERNAME, NEO4J_PASSWORD))
-
 
 def vector_hits(qvec, k=40) -> List[Dict]:
     cy = """
