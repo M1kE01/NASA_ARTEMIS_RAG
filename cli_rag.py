@@ -6,18 +6,25 @@ from neo4j import GraphDatabase
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-
+import getpass
 from dotenv import load_dotenv, find_dotenv
+
 load_dotenv(find_dotenv(), override=True)
 
 # Silence LangSmith
 os.environ["LANGSMITH_TRACING"] = "false"
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+if not GOOGLE_API_KEY:
+    GOOGLE_API_KEY = getpass.getpass("Enter your GOOGLE_API_KEY (input hidden): ").strip()
+    if not GOOGLE_API_KEY:
+        print("A Google API key is required to run cli_rag.")
+        sys.exit(1)
 
 if not (GOOGLE_API_KEY and NEO4J_URI and NEO4J_USERNAME and NEO4J_PASSWORD):
     print("Missing env vars. Ensure GOOGLE_API_KEY, NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD are set in .env")

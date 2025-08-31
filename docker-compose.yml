@@ -1,0 +1,27 @@
+version: "3.9"
+
+services:
+  neo4j:
+    image: neo4j:5
+    container_name: rag_nasa_neo4j
+    restart: unless-stopped
+    ports:
+      - "7474:7474"   # HTTP
+      - "7687:7687"   # BOLT
+    environment:
+      NEO4J_AUTH: neo4j/password
+
+      # Helpful tuning
+      NEO4J_server_memory_heap_initial__size: 1G
+      NEO4J_server_memory_heap_max__size: 1G
+      NEO4J_server_memory_pagecache_size: 1G
+
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_plugins:/plugins
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  neo4j_plugins:

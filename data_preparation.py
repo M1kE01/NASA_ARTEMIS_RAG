@@ -1,10 +1,10 @@
 import os
 import json
 from pathlib import Path
-
+import sys
 from dotenv import load_dotenv, find_dotenv
 from neo4j import GraphDatabase
-
+import getpass
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
@@ -13,13 +13,17 @@ load_dotenv(find_dotenv(), override=True)
 os.environ["LANGSMITH_TRACING"] = "false"
 os.environ["LANGCHAIN_TRACING_V2"] = "false"
 
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 NEO4J_URI = os.getenv("NEO4J_URI")
 NEO4J_USERNAME = os.getenv("NEO4J_USERNAME")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 if not GOOGLE_API_KEY:
-    raise RuntimeError("Set GOOGLE_API_KEY in .env")
+    GOOGLE_API_KEY = getpass.getpass("Enter your GOOGLE_API_KEY (input hidden): ").strip()
+    if not GOOGLE_API_KEY:
+        print("A Google API key is required to run cli_rag.")
+        sys.exit(1)
+
 if not (NEO4J_URI and NEO4J_USERNAME and NEO4J_PASSWORD):
     raise RuntimeError("Set NEO4J_URI, NEO4J_USERNAME, NEO4J_PASSWORD in .env")
 
